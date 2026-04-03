@@ -22,6 +22,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     }, 1000);
   };
 
+  const handleReset = () => {
+    localStorage.removeItem('GEMINI_API_KEY');
+    setApiKey('');
+    setIsSaved(true);
+    setTimeout(() => {
+      setIsSaved(false);
+      onClose();
+      window.location.reload();
+    }, 1000);
+  };
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -72,23 +83,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 </p>
               </div>
 
-              <button
-                onClick={handleSave}
-                disabled={isSaved}
-                className={cn(
-                  "w-full py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-2",
-                  isSaved ? "bg-green-600 text-white" : "bg-slate-900 text-white hover:bg-slate-800"
-                )}
-              >
-                {isSaved ? (
-                  <>
-                    <Check className="w-5 h-5" />
-                    Saved Successfully
-                  </>
-                ) : (
-                  "Save Settings"
-                )}
-              </button>
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={handleSave}
+                  disabled={isSaved}
+                  className={cn(
+                    "w-full py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-2",
+                    isSaved ? "bg-green-600 text-white" : "bg-slate-900 text-white hover:bg-slate-800"
+                  )}
+                >
+                  {isSaved ? (
+                    <>
+                      <Check className="w-5 h-5" />
+                      Saved Successfully
+                    </>
+                  ) : (
+                    "Save Settings"
+                  )}
+                </button>
+
+                <button
+                  onClick={handleReset}
+                  className="w-full py-3 text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors"
+                >
+                  Reset to Default Key
+                </button>
+              </div>
             </div>
           </motion.div>
         </div>

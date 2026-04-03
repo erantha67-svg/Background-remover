@@ -5,16 +5,22 @@ let aiInstance: GoogleGenAI | null = null;
 
 function getAI() {
   const userApiKey = typeof window !== 'undefined' ? localStorage.getItem('GEMINI_API_KEY') : null;
-  const apiKey = userApiKey || process.env.GEMINI_API_KEY || process.env.Gemini_API_Key;
+  const rawApiKey = userApiKey || process.env.GEMINI_API_KEY || process.env.Gemini_API_Key;
+  const apiKey = rawApiKey?.trim();
+
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY is not defined. Please set it in your environment variables or enter it in the settings.");
   }
-  // If the key has changed, we need to recreate the instance
-  if (aiInstance && (aiInstance as any)._apiKey !== apiKey) {
+  
+  console.log(`Using API key starting with: ${apiKey.substring(0, 8)}...`);
+
+  // Recreate instance if key changes or doesn't exist
+  if (!aiInstance || (aiInstance as any)._apiKey !== apiKey) {
     aiInstance = new GoogleGenAI({ apiKey });
-  } else if (!aiInstance) {
-    aiInstance = new GoogleGenAI({ apiKey });
+    // Store the key on the instance for comparison (hacky but works for this check)
+    (aiInstance as any)._apiKey = apiKey;
   }
+  
   return aiInstance;
 }
 
