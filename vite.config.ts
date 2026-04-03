@@ -5,10 +5,16 @@ import {defineConfig, loadEnv} from 'vite';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
+  // Try to get the key from .env files first, then from the system environment
+  // Netlify sometimes uses mixed case, so we check both
+  const apiKey = env.GEMINI_API_KEY || env.Gemini_API_Key || process.env.GEMINI_API_KEY || process.env.Gemini_API_Key || '';
+  
   return {
     plugins: [react(), tailwindcss()],
     define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+      'process.env.GEMINI_API_KEY': JSON.stringify(apiKey),
+      'process.env.Gemini_API_Key': JSON.stringify(apiKey),
+      'process.env.NODE_ENV': JSON.stringify(mode),
     },
     resolve: {
       alias: {

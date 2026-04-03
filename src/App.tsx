@@ -1,16 +1,65 @@
-import React, { useState, ReactNode } from 'react';
+import React, { useState, ReactNode, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shirt, Sparkles, Layers, MousePointer2, Download, AlertCircle } from 'lucide-react';
+import { Shirt, Sparkles, Layers, MousePointer2, Download, AlertCircle, Settings, LogOut, User as UserIcon, History } from 'lucide-react';
 import { ImageUploader } from './components/ImageUploader';
 import { Editor } from './components/Editor';
+import { TemplateSelector } from './components/TemplateSelector';
+import { SettingsModal } from './components/SettingsModal';
 import { removeBackground } from './services/gemini';
 import { cn } from './lib/utils';
+import { compressImage } from './lib/imageUtils';
+import { auth, signInWithGoogle, signOut, db } from './lib/firebase';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { collection, query, orderBy, onSnapshot, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 export default function App() {
   const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [processedImage, setProcessedImage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [designs, setDesigns] = useState<any[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+
+  const isApiKeyMissing = !process.env.GEMINI_API_KEY && !process.env.Gemini_API_Key && !localStorage.getItem('GEMINI_API_KEY');
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setDesigns([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'users', user.uid, 'designs'),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const designsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setDesigns(designsData);
+    }, (err) => {
+      console.error("Error fetching designs:", err);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log("API Key Status:", isApiKeyMissing ? "Missing" : "Found");
+    }
+  }, [isApiKeyMissing]);
 
   const handleImageSelect = async (file: File) => {
     const reader = new FileReader();
@@ -21,16 +70,57 @@ export default function App() {
       setError(null);
 
       try {
-        const result = await removeBackground(base64, file.type);
+        // Compress image before sending to AI to reduce bandwidth and processing time
+        // We target 1600px max dimension for good balance of quality and speed
+        const compressedBase64 = await compressImage(base64, 1600, 1600, 0.85);
+        
+        const result = await removeBackground(compressedBase64, 'image/jpeg');
         setProcessedImage(result);
-      } catch (err) {
+      } catch (err: any) {
         console.error(err);
-        setError("Failed to remove background. Please try again with a clearer image.");
+        setError(err.message || "Failed to remove background. Please try again with a clearer image.");
       } finally {
         setIsProcessing(false);
       }
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleTemplateSelect = async (imageUrl: string) => {
+    setOriginalImage(imageUrl);
+    setIsProcessing(true);
+    setError(null);
+
+    try {
+      // For templates, we can fetch the image and convert to base64
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      const base64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(blob);
+      });
+
+      const compressedBase64 = await compressImage(base64, 1600, 1600, 0.85);
+      const result = await removeBackground(compressedBase64, 'image/jpeg');
+      setProcessedImage(result);
+
+      // Save to history if user is logged in
+      if (user) {
+        const designId = Date.now().toString();
+        await setDoc(doc(db, 'users', user.uid, 'designs', designId), {
+          id: designId,
+          userId: user.uid,
+          processedImageUrl: result,
+          createdAt: serverTimestamp()
+        });
+      }
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Failed to process template. Please try again.");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const reset = () => {
@@ -55,18 +145,96 @@ export default function App() {
           </div>
           
           <div className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-500">
-            <a href="#" className="hover:text-blue-600 transition-colors">Templates</a>
+            <button onClick={() => {
+              if (originalImage) reset();
+              // Scroll to templates
+              const el = document.getElementById('templates-section');
+              el?.scrollIntoView({ behavior: 'smooth' });
+            }} className="hover:text-blue-600 transition-colors">Templates</button>
             <a href="#" className="hover:text-blue-600 transition-colors">Pricing</a>
-            <a href="#" className="hover:text-blue-600 transition-colors">API</a>
+            <button onClick={() => setShowSettings(true)} className="hover:text-blue-600 transition-colors flex items-center gap-1">
+              <Settings className="w-4 h-4" />
+              API Settings
+            </button>
+            {user && (
+              <button onClick={() => setShowHistory(!showHistory)} className="hover:text-blue-600 transition-colors flex items-center gap-1">
+                <History className="w-4 h-4" />
+                History
+              </button>
+            )}
           </div>
 
-          <button className="bg-slate-900 text-white px-5 py-2 rounded-xl text-sm font-semibold hover:bg-slate-800 transition-all">
-            Sign In
-          </button>
+          <div className="flex items-center gap-4">
+            {user ? (
+              <div className="flex items-center gap-3">
+                <div className="hidden sm:block text-right">
+                  <p className="text-xs font-bold text-slate-900">{user.displayName}</p>
+                  <button onClick={() => signOut()} className="text-[10px] text-slate-400 hover:text-red-500 font-bold uppercase tracking-widest">Sign Out</button>
+                </div>
+                {user.photoURL ? (
+                  <img src={user.photoURL} alt={user.displayName || ''} className="w-9 h-9 rounded-full border border-slate-200" referrerPolicy="no-referrer" />
+                ) : (
+                  <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                    <UserIcon className="w-5 h-5" />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <button 
+                onClick={() => signInWithGoogle()}
+                className="bg-slate-900 text-white px-5 py-2 rounded-xl text-sm font-semibold hover:bg-slate-800 transition-all flex items-center gap-2"
+              >
+                <UserIcon className="w-4 h-4" />
+                Sign In
+              </button>
+            )}
+          </div>
         </div>
+        {isApiKeyMissing && (
+          <div className="bg-amber-50 border-t border-amber-200 px-6 py-2 text-center">
+            <p className="text-xs font-medium text-amber-800 flex items-center justify-center gap-2">
+              <AlertCircle className="w-3 h-3" />
+              API Key Missing: Please set <strong>GEMINI_API_KEY</strong> in your environment variables or <button onClick={() => setShowSettings(true)} className="underline font-bold">enter it in settings</button>.
+            </p>
+          </div>
+        )}
       </nav>
 
+      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
+
       <main className="pt-24 pb-12 px-6 max-w-7xl mx-auto">
+        {showHistory && user && designs.length > 0 && (
+          <motion.div 
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mb-12 bg-white rounded-3xl border border-slate-200 p-8 overflow-hidden"
+          >
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2">
+                <History className="w-5 h-5 text-blue-600" />
+                <h2 className="text-xl font-bold">Recent Designs</h2>
+              </div>
+              <button onClick={() => setShowHistory(false)} className="text-xs font-bold text-slate-400 hover:text-slate-600 uppercase tracking-widest">Close History</button>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-4">
+              {designs.map((design) => (
+                <button 
+                  key={design.id}
+                  onClick={() => {
+                    setProcessedImage(design.processedImageUrl);
+                    setOriginalImage(design.processedImageUrl); // Use processed as original for re-editing
+                    setShowHistory(false);
+                  }}
+                  className="group relative aspect-square rounded-xl overflow-hidden border border-slate-100 hover:border-blue-500 transition-all"
+                >
+                  <img src={design.processedImageUrl} alt="Saved design" className="w-full h-full object-contain p-2" referrerPolicy="no-referrer" />
+                  <div className="absolute inset-0 bg-blue-600/0 group-hover:bg-blue-600/10 transition-colors" />
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
         <AnimatePresence mode="wait">
           {!originalImage ? (
             <motion.div 
@@ -90,6 +258,10 @@ export default function App() {
               </p>
 
               <ImageUploader onImageSelect={handleImageSelect} className="w-full max-w-xl" />
+
+              <div id="templates-section" className="w-full">
+                <TemplateSelector onSelect={handleTemplateSelect} />
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-20 w-full">
                 <Feature 

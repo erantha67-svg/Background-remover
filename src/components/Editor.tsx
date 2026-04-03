@@ -13,10 +13,20 @@ import {
   Printer,
   FileImage,
   FileText,
-  Sparkles
+  Sparkles,
+  Crop,
+  Sliders,
+  Sun,
+  Contrast,
+  Palette,
+  RotateCcw,
+  Thermometer,
+  Zap,
+  CloudSun,
+  Moon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn } from '@/src/lib/utils';
+import { cn } from '../lib/utils';
 import jsPDF from 'jspdf';
 import confetti from 'canvas-confetti';
 
@@ -26,7 +36,14 @@ interface EditorProps {
   onReset: () => void;
 }
 
-type Tool = 'erase' | 'restore';
+type Tool = 'erase' | 'restore' | 'crop';
+
+interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, onReset }) => {
   const [tool, setTool] = useState<Tool>('erase');
@@ -34,6 +51,16 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
   const [zoom, setZoom] = useState(1);
   const [isDrawing, setIsDrawing] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [cropRect, setCropRect] = useState<Rect | null>(null);
+  const [isSelectingCrop, setIsSelectingCrop] = useState(false);
+  const [cropStart, setCropStart] = useState<{ x: number; y: number } | null>(null);
+  const [canvasOffset, setCanvasOffset] = useState({ x: 0, y: 0 });
+  const [showFiltersMenu, setShowFiltersMenu] = useState(false);
+  const [brightness, setBrightness] = useState(100);
+  const [contrast, setContrast] = useState(100);
+  const [saturation, setSaturation] = useState(100);
+  const [temperature, setTemperature] = useState(0);
+  const [vibrance, setVibrance] = useState(0);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -67,6 +94,7 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       maskCtx.putImageData(imageData, 0, 0);
       
+      setCanvasOffset({ x: 0, y: 0 });
       saveToHistory();
     };
   }, [processedImage]);
@@ -132,16 +160,81 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
     ctx.filter = 'blur(1px)';
     ctx.drawImage(tempCanvas, 0, 0);
     ctx.filter = 'none';
+    saveToHistory();
+  };
+
+  const applyFilter = (filter: string) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = canvas.width;
+    tempCanvas.height = canvas.height;
+    const tCtx = tempCanvas.getContext('2d');
+    if (!tCtx) return;
+
+    tCtx.drawImage(canvas, 0, 0);
+    
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.filter = filter;
+    ctx.drawImage(tempCanvas, 0, 0);
+    ctx.filter = 'none';
     
     saveToHistory();
   };
 
+  const applyAdjustments = () => {
+    // Construct a complex filter string
+    // Temperature is simulated with sepia and hue-rotate
+    const tempFilter = temperature > 0 
+      ? `sepia(${temperature}%)` 
+      : `hue-rotate(${Math.abs(temperature) * 2}deg) saturate(${100 + Math.abs(temperature)}%)`;
+    
+    const vibranceFilter = `saturate(${100 + vibrance}%) contrast(${100 + (vibrance / 4)}%)`;
+    
+    const filter = `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%) ${tempFilter} ${vibranceFilter}`;
+    applyFilter(filter);
+    
+    // Reset sliders after applying to bake them in
+    setBrightness(100);
+    setContrast(100);
+    setSaturation(100);
+    setTemperature(0);
+    setVibrance(0);
+    setShowFiltersMenu(false);
+  };
+
   const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
+    if (tool === 'crop') {
+      setIsSelectingCrop(true);
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      let clientX, clientY;
+      if ('touches' in e) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+      } else {
+        clientX = e.clientX;
+        clientY = e.clientY;
+      }
+      const x = (clientX - rect.left) * (canvas.width / rect.width);
+      const y = (clientY - rect.top) * (canvas.height / rect.height);
+      setCropStart({ x, y });
+      setCropRect({ x, y, width: 0, height: 0 });
+      return;
+    }
     setIsDrawing(true);
     draw(e);
   };
 
   const stopDrawing = () => {
+    if (isSelectingCrop) {
+      setIsSelectingCrop(false);
+      return;
+    }
     if (isDrawing) {
       setIsDrawing(false);
       saveToHistory();
@@ -149,7 +242,6 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
   };
 
   const draw = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!isDrawing) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -168,6 +260,20 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
 
     const x = (clientX - rect.left) * (canvas.width / rect.width);
     const y = (clientY - rect.top) * (canvas.height / rect.height);
+
+    if (isSelectingCrop && cropStart) {
+      const width = x - cropStart.x;
+      const height = y - cropStart.y;
+      setCropRect({
+        x: width > 0 ? cropStart.x : x,
+        y: height > 0 ? cropStart.y : y,
+        width: Math.abs(width),
+        height: Math.abs(height)
+      });
+      return;
+    }
+
+    if (!isDrawing) return;
 
     if (tool === 'erase') {
       ctx.globalCompositeOperation = 'destination-out';
@@ -192,11 +298,49 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
         tCtx.arc(x, y, brushSize / zoom, 0, Math.PI * 2);
         tCtx.fill();
         tCtx.globalCompositeOperation = 'source-in';
-        tCtx.drawImage(originalImg, 0, 0);
+        tCtx.drawImage(originalImg, -canvasOffset.x, -canvasOffset.y);
         
         ctx.drawImage(tempCanvas, 0, 0);
       }
     }
+  };
+
+  const handleCrop = () => {
+    if (!cropRect || cropRect.width < 5 || cropRect.height < 5) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = cropRect.width;
+    tempCanvas.height = cropRect.height;
+    const tCtx = tempCanvas.getContext('2d');
+    if (!tCtx) return;
+
+    tCtx.drawImage(
+      canvas,
+      cropRect.x,
+      cropRect.y,
+      cropRect.width,
+      cropRect.height,
+      0,
+      0,
+      cropRect.width,
+      cropRect.height
+    );
+
+    canvas.width = cropRect.width;
+    canvas.height = cropRect.height;
+    ctx.drawImage(tempCanvas, 0, 0);
+
+    setCanvasOffset(prev => ({
+      x: prev.x + cropRect.x,
+      y: prev.y + cropRect.y
+    }));
+    setCropRect(null);
+    setTool('erase');
+    saveToHistory();
   };
 
   const handleExport = async (format: 'png' | 'pdf' | 'tiff', size: 'standard' | 'print' | 'a4' | 'a3') => {
@@ -273,6 +417,159 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
             Smooth
           </button>
           <div className="h-6 w-px bg-slate-200 mx-2" />
+          
+          <div className="relative">
+            <button 
+              onClick={() => setShowFiltersMenu(!showFiltersMenu)}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
+                showFiltersMenu ? "bg-blue-50 text-blue-600" : "text-slate-500 hover:bg-slate-100"
+              )}
+              title="Image Filters & Adjustments"
+            >
+              <Sliders className="w-4 h-4 text-purple-500" />
+              Filters
+            </button>
+
+            <AnimatePresence>
+              {showFiltersMenu && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  className="absolute left-0 mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 p-5 z-50"
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Adjustments</p>
+                    <button 
+                      onClick={() => {
+                        setBrightness(100);
+                        setContrast(100);
+                        setSaturation(100);
+                        setTemperature(0);
+                        setVibrance(0);
+                      }}
+                      className="text-[10px] text-blue-600 font-bold hover:underline"
+                    >
+                      Reset Sliders
+                    </button>
+                  </div>
+
+                  <div className="space-y-4 mb-6 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase">
+                        <span className="flex items-center gap-1"><Sun className="w-3 h-3" /> Brightness</span>
+                        <span>{brightness}%</span>
+                      </div>
+                      <input 
+                        type="range" min="0" max="200" value={brightness} 
+                        onChange={(e) => setBrightness(parseInt(e.target.value))}
+                        className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase">
+                        <span className="flex items-center gap-1"><Contrast className="w-3 h-3" /> Contrast</span>
+                        <span>{contrast}%</span>
+                      </div>
+                      <input 
+                        type="range" min="0" max="200" value={contrast} 
+                        onChange={(e) => setContrast(parseInt(e.target.value))}
+                        className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase">
+                        <span className="flex items-center gap-1"><Palette className="w-3 h-3" /> Saturation</span>
+                        <span>{saturation}%</span>
+                      </div>
+                      <input 
+                        type="range" min="0" max="200" value={saturation} 
+                        onChange={(e) => setSaturation(parseInt(e.target.value))}
+                        className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase">
+                        <span className="flex items-center gap-1"><Zap className="w-3 h-3" /> Vibrance</span>
+                        <span>{vibrance > 0 ? `+${vibrance}` : vibrance}%</span>
+                      </div>
+                      <input 
+                        type="range" min="-100" max="100" value={vibrance} 
+                        onChange={(e) => setVibrance(parseInt(e.target.value))}
+                        className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase">
+                        <span className="flex items-center gap-1"><Thermometer className="w-3 h-3" /> Temperature</span>
+                        <span>{temperature > 0 ? 'Warm' : temperature < 0 ? 'Cool' : 'Neutral'}</span>
+                      </div>
+                      <input 
+                        type="range" min="-50" max="50" value={temperature} 
+                        onChange={(e) => setTemperature(parseInt(e.target.value))}
+                        className="w-full h-1.5 bg-gradient-to-r from-blue-400 via-slate-200 to-orange-400 rounded-lg appearance-none cursor-pointer"
+                      />
+                    </div>
+                    <button 
+                      onClick={applyAdjustments}
+                      className="w-full py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors shadow-lg shadow-blue-100"
+                    >
+                      Apply Adjustments
+                    </button>
+                  </div>
+
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Color Correction Presets</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button 
+                      onClick={() => applyFilter('saturate(150%) contrast(110%)')}
+                      className="flex items-center gap-2 p-2 hover:bg-slate-50 rounded-lg border border-slate-100 text-[10px] font-bold text-slate-600 transition-colors"
+                    >
+                      <Zap className="w-3 h-3 text-purple-500" />
+                      Vibrance
+                    </button>
+                    <button 
+                      onClick={() => applyFilter('brightness(120%) contrast(110%)')}
+                      className="flex items-center gap-2 p-2 hover:bg-slate-50 rounded-lg border border-slate-100 text-[10px] font-bold text-slate-600 transition-colors"
+                    >
+                      <CloudSun className="w-3 h-3 text-orange-500" />
+                      Highlights
+                    </button>
+                    <button 
+                      onClick={() => applyFilter('brightness(85%) contrast(115%)')}
+                      className="flex items-center gap-2 p-2 hover:bg-slate-50 rounded-lg border border-slate-100 text-[10px] font-bold text-slate-600 transition-colors"
+                    >
+                      <Moon className="w-3 h-3 text-indigo-500" />
+                      Shadows
+                    </button>
+                    <button 
+                      onClick={() => applyFilter('sepia(30%) saturate(120%)')}
+                      className="flex items-center gap-2 p-2 hover:bg-slate-50 rounded-lg border border-slate-100 text-[10px] font-bold text-slate-600 transition-colors"
+                    >
+                      <Thermometer className="w-3 h-3 text-red-500" />
+                      Warm Balance
+                    </button>
+                    <button 
+                      onClick={() => applyFilter('hue-rotate(180deg) sepia(20%) hue-rotate(-180deg) saturate(120%)')}
+                      className="flex items-center gap-2 p-2 hover:bg-slate-50 rounded-lg border border-slate-100 text-[10px] font-bold text-slate-600 transition-colors"
+                    >
+                      <Thermometer className="w-3 h-3 text-blue-500" />
+                      Cool Balance
+                    </button>
+                    <button 
+                      onClick={() => applyFilter('grayscale(100%)')}
+                      className="flex items-center gap-2 p-2 hover:bg-slate-50 rounded-lg border border-slate-100 text-[10px] font-bold text-slate-600 transition-colors"
+                    >
+                      <Palette className="w-3 h-3 text-slate-500" />
+                      Grayscale
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          <div className="h-6 w-px bg-slate-200 mx-2" />
           <div className="flex bg-slate-100 p-1 rounded-xl">
             <button 
               onClick={() => setTool('erase')}
@@ -294,7 +591,29 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
               <Paintbrush className="w-4 h-4" />
               Restore
             </button>
+            <button 
+              onClick={() => {
+                setTool('crop');
+                setCropRect(null);
+              }}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
+                tool === 'crop' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              )}
+            >
+              <Crop className="w-4 h-4" />
+              Crop
+            </button>
           </div>
+          {tool === 'crop' && cropRect && (
+            <button 
+              onClick={handleCrop}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold bg-green-600 text-white hover:bg-green-700 transition-all shadow-lg shadow-green-100"
+            >
+              <Check className="w-4 h-4" />
+              Apply Crop
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-3">
@@ -417,6 +736,22 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
               onTouchEnd={stopDrawing}
               className="max-w-full max-h-[70vh] block"
             />
+            {tool === 'crop' && cropRect && (
+              <div 
+                className="absolute border-2 border-blue-500 bg-blue-500/10 pointer-events-none"
+                style={{
+                  left: cropRect.x,
+                  top: cropRect.y,
+                  width: cropRect.width,
+                  height: cropRect.height
+                }}
+              >
+                <div className="absolute -top-1 -left-1 w-2 h-2 bg-blue-500" />
+                <div className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500" />
+                <div className="absolute -bottom-1 -left-1 w-2 h-2 bg-blue-500" />
+                <div className="absolute -bottom-1 -right-1 w-2 h-2 bg-blue-500" />
+              </div>
+            )}
             {/* Hidden mask canvas */}
             <canvas ref={maskCanvasRef} className="hidden" />
           </div>
