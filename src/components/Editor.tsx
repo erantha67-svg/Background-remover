@@ -69,7 +69,13 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
   const containerRef = useRef<HTMLDivElement>(null);
 
   // History for undo/redo
-  const [history, setHistory] = useState<ImageData[]>([]);
+  interface HistoryItem {
+    imageData: ImageData;
+    width: number;
+    height: number;
+    offset: { x: number; y: number };
+  }
+  const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
 
   useEffect(() => {
@@ -109,10 +115,15 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
 
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const newHistory = history.slice(0, historyIndex + 1);
-    newHistory.push(imageData);
+    newHistory.push({
+      imageData,
+      width: canvas.width,
+      height: canvas.height,
+      offset: { ...canvasOffset }
+    });
     
     // Limit history size
-    if (newHistory.length > 20) newHistory.shift();
+    if (newHistory.length > 30) newHistory.shift();
     
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
@@ -121,11 +132,20 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
   const undo = () => {
     if (historyIndex > 0) {
       const newIndex = historyIndex - 1;
+      const item = history[newIndex];
       setHistoryIndex(newIndex);
+      
       const canvas = canvasRef.current;
-      if (canvas) {
+      const maskCanvas = maskCanvasRef.current;
+      if (canvas && maskCanvas) {
+        canvas.width = item.width;
+        canvas.height = item.height;
+        maskCanvas.width = item.width;
+        maskCanvas.height = item.height;
+        
         const ctx = canvas.getContext('2d');
-        ctx?.putImageData(history[newIndex], 0, 0);
+        ctx?.putImageData(item.imageData, 0, 0);
+        setCanvasOffset(item.offset);
       }
     }
   };
@@ -133,11 +153,20 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
   const redo = () => {
     if (historyIndex < history.length - 1) {
       const newIndex = historyIndex + 1;
+      const item = history[newIndex];
       setHistoryIndex(newIndex);
+      
       const canvas = canvasRef.current;
-      if (canvas) {
+      const maskCanvas = maskCanvasRef.current;
+      if (canvas && maskCanvas) {
+        canvas.width = item.width;
+        canvas.height = item.height;
+        maskCanvas.width = item.width;
+        maskCanvas.height = item.height;
+        
         const ctx = canvas.getContext('2d');
-        ctx?.putImageData(history[newIndex], 0, 0);
+        ctx?.putImageData(item.imageData, 0, 0);
+        setCanvasOffset(item.offset);
       }
     }
   };

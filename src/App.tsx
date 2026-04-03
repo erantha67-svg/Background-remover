@@ -5,6 +5,7 @@ import { ImageUploader } from './components/ImageUploader';
 import { Editor } from './components/Editor';
 import { TemplateSelector } from './components/TemplateSelector';
 import { SettingsModal } from './components/SettingsModal';
+import { ImageGenerator } from './components/ImageGenerator';
 import { removeBackground } from './services/gemini';
 import { cn } from './lib/utils';
 import { compressImage } from './lib/imageUtils';
@@ -18,11 +19,13 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showGenerator, setShowGenerator] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [designs, setDesigns] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
   const isApiKeyMissing = !process.env.GEMINI_API_KEY && !process.env.Gemini_API_Key && !localStorage.getItem('GEMINI_API_KEY');
+  const isUsingPersonalKey = !!localStorage.getItem('GEMINI_API_KEY');
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -65,25 +68,29 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = async (e) => {
       const base64 = e.target?.result as string;
-      setOriginalImage(base64);
-      setIsProcessing(true);
-      setError(null);
-
-      try {
-        // Compress image before sending to AI to reduce bandwidth and processing time
-        // We target 1600px max dimension for good balance of quality and speed
-        const compressedBase64 = await compressImage(base64, 1600, 1600, 0.85);
-        
-        const result = await removeBackground(compressedBase64, 'image/jpeg');
-        setProcessedImage(result);
-      } catch (err: any) {
-        console.error(err);
-        setError(err.message || "Failed to remove background. Please try again with a clearer image.");
-      } finally {
-        setIsProcessing(false);
-      }
+      handleImageSelectFromUrl(base64);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleImageSelectFromUrl = async (base64: string) => {
+    setOriginalImage(base64);
+    setIsProcessing(true);
+    setError(null);
+
+    try {
+      // Compress image before sending to AI to reduce bandwidth and processing time
+      // We target 1600px max dimension for good balance of quality and speed
+      const compressedBase64 = await compressImage(base64, 1600, 1600, 0.85);
+      
+      const result = await removeBackground(compressedBase64, 'image/jpeg');
+      setProcessedImage(result);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Failed to remove background. Please try again with a clearer image.");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleTemplateSelect = async (imageUrl: string) => {
@@ -152,9 +159,17 @@ export default function App() {
               el?.scrollIntoView({ behavior: 'smooth' });
             }} className="hover:text-blue-600 transition-colors">Templates</button>
             <a href="#" className="hover:text-blue-600 transition-colors">Pricing</a>
-            <button onClick={() => setShowSettings(true)} className="hover:text-blue-600 transition-colors flex items-center gap-1">
-              <Settings className="w-4 h-4" />
-              API Settings
+            <button onClick={() => setShowSettings(true)} className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all",
+              isUsingPersonalKey ? "bg-green-50 text-green-700 border border-green-100" : "hover:text-blue-600"
+            )}>
+              <Settings className={cn("w-4 h-4", isUsingPersonalKey ? "text-green-600" : "")} />
+              <div className="text-left">
+                <p className="text-[10px] font-bold leading-none">API Settings</p>
+                <p className="text-[8px] font-medium opacity-60 leading-none mt-0.5">
+                  {isUsingPersonalKey ? "Personal Key Active" : "Using Shared Key"}
+                </p>
+              </div>
             </button>
             {user && (
               <button onClick={() => setShowHistory(!showHistory)} className="hover:text-blue-600 transition-colors flex items-center gap-1">
@@ -201,6 +216,18 @@ export default function App() {
       </nav>
 
       <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
+      <ImageGenerator 
+        isOpen={showGenerator} 
+        onClose={() => setShowGenerator(false)} 
+        onImageGenerated={(imageUrl) => {
+          setOriginalImage(imageUrl);
+          setProcessedImage(imageUrl); // Start with the generated image as processed
+          // Background removal will be triggered if the user wants, 
+          // but for now we just load it into the editor
+          // Actually, let's trigger background removal automatically if it's an AI generated image
+          handleImageSelectFromUrl(imageUrl);
+        }} 
+      />
 
       <main className="pt-24 pb-12 px-6 max-w-7xl mx-auto">
         {showHistory && user && designs.length > 0 && (
@@ -257,7 +284,19 @@ export default function App() {
                 Upload your T-shirt designs and get high-fidelity, print-ready transparency in seconds. Optimized for fabric textures and complex edges.
               </p>
 
-              <ImageUploader onImageSelect={handleImageSelect} className="w-full max-w-xl" />
+              <div className="flex flex-col sm:flex-row gap-4 w-full max-w-xl mb-12">
+                <ImageUploader onImageSelect={handleImageSelect} className="flex-1" />
+                <div className="flex flex-col justify-center gap-4">
+                  <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">Or</div>
+                  <button 
+                    onClick={() => setShowGenerator(true)}
+                    className="flex items-center justify-center gap-3 px-8 py-4 bg-white border-2 border-blue-100 rounded-2xl text-blue-600 font-bold hover:bg-blue-50 hover:border-blue-200 transition-all shadow-sm"
+                  >
+                    <Sparkles className="w-5 h-5" />
+                    AI Generator
+                  </button>
+                </div>
+              </div>
 
               <div id="templates-section" className="w-full">
                 <TemplateSelector onSelect={handleTemplateSelect} />
@@ -318,13 +357,24 @@ export default function App() {
                 <AlertCircle className="w-8 h-8" />
               </div>
               <h3 className="text-2xl font-bold mb-2">Something went wrong</h3>
-              <p className="text-slate-500 mb-8 max-w-md">{error}</p>
-              <button 
-                onClick={reset}
-                className="bg-slate-900 text-white px-8 py-3 rounded-xl font-bold hover:bg-slate-800 transition-all"
-              >
-                Try Another Image
-              </button>
+              <p className="text-slate-500 mb-8 max-w-md leading-relaxed">{error}</p>
+              
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button 
+                  onClick={reset}
+                  className="bg-slate-900 text-white px-8 py-3 rounded-xl font-bold hover:bg-slate-800 transition-all"
+                >
+                  Try Another Image
+                </button>
+                {error.includes("Quota") && (
+                  <button 
+                    onClick={() => setShowSettings(true)}
+                    className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100"
+                  >
+                    Enter Personal API Key
+                  </button>
+                )}
+              </div>
             </motion.div>
           ) : (
             <motion.div 

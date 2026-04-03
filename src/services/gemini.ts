@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { callGeminiWithRetry, handleGeminiError } from "./geminiUtils";
 
 // Lazy initialization to prevent crash if API key is missing at load time
 let aiInstance: GoogleGenAI | null = null;
@@ -25,8 +26,9 @@ function getAI() {
 }
 
 export async function removeBackground(base64Image: string, mimeType: string): Promise<string> {
-  try {
-    const ai = getAI();
+  const ai = getAI();
+  
+  const apiCall = async () => {
     // Using gemini-2.5-flash-image for maximum compatibility
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-image",
@@ -60,24 +62,14 @@ export async function removeBackground(base64Image: string, mimeType: string): P
     }
 
     throw new Error("No image data was found in the AI response. The image might be too complex or violate safety guidelines.");
+  };
+
+  try {
+    return await callGeminiWithRetry(apiCall);
   } catch (error: any) {
-    console.error("Error removing background:", error);
-    
-    // Handle specific API errors
-    const errorString = JSON.stringify(error);
-    
-    if (errorString.includes("403") || errorString.includes("PERMISSION_DENIED")) {
-      throw new Error("API Permission Denied: Your API key might not have permission for this model, or the Generative Language API is not enabled in your Google Cloud project. Please check your API key settings at ai.google.dev.");
-    }
-    
-    if (error.message?.includes("safety")) {
-      throw new Error("The image was flagged by safety filters. Please try another image.");
-    }
-    
-    if (error.message?.includes("quota") || error.message?.includes("429")) {
-      throw new Error("API quota exceeded. Please try again in a few minutes.");
-    }
-    
+    console.error("Error removing background after retries:", error);
+    // handleGeminiError is already called within callGeminiWithRetry, 
+    // but we re-throw to be safe or handle any final errors here.
     throw error;
   }
 }
