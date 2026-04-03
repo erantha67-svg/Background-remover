@@ -48,6 +48,8 @@ interface Rect {
 export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, onReset }) => {
   const [tool, setTool] = useState<Tool>('erase');
   const [brushSize, setBrushSize] = useState(20);
+  const [brushStyle, setBrushStyle] = useState<'hard' | 'soft' | 'textured'>('hard');
+  const [brushOpacity, setBrushOpacity] = useState(1);
   const [zoom, setZoom] = useState(1);
   const [isDrawing, setIsDrawing] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -261,6 +263,33 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
     const x = (clientX - rect.left) * (canvas.width / rect.width);
     const y = (clientY - rect.top) * (canvas.height / rect.height);
 
+    const drawBrush = (targetCtx: CanvasRenderingContext2D, px: number, py: number, size: number) => {
+      targetCtx.globalAlpha = brushOpacity;
+      if (brushStyle === 'hard') {
+        targetCtx.beginPath();
+        targetCtx.arc(px, py, size, 0, Math.PI * 2);
+        targetCtx.fill();
+      } else if (brushStyle === 'soft') {
+        const gradient = targetCtx.createRadialGradient(px, py, 0, px, py, size);
+        gradient.addColorStop(0, 'rgba(0,0,0,1)');
+        gradient.addColorStop(1, 'rgba(0,0,0,0)');
+        targetCtx.fillStyle = gradient;
+        targetCtx.beginPath();
+        targetCtx.arc(px, py, size, 0, Math.PI * 2);
+        targetCtx.fill();
+      } else if (brushStyle === 'textured') {
+        for (let i = 0; i < 8; i++) {
+          const offsetX = (Math.random() - 0.5) * size * 1.5;
+          const offsetY = (Math.random() - 0.5) * size * 1.5;
+          const r = (Math.random() * size) / 3;
+          targetCtx.beginPath();
+          targetCtx.arc(px + offsetX, py + offsetY, r, 0, Math.PI * 2);
+          targetCtx.fill();
+        }
+      }
+      targetCtx.globalAlpha = 1;
+    };
+
     if (isSelectingCrop && cropStart) {
       const width = x - cropStart.x;
       const height = y - cropStart.y;
@@ -277,9 +306,7 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
 
     if (tool === 'erase') {
       ctx.globalCompositeOperation = 'destination-out';
-      ctx.beginPath();
-      ctx.arc(x, y, brushSize / zoom, 0, Math.PI * 2);
-      ctx.fill();
+      drawBrush(ctx, x, y, brushSize / zoom);
     } else {
       // Restore logic
       const originalImg = new Image();
@@ -294,9 +321,7 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
       const tCtx = tempCanvas.getContext('2d');
       
       if (tCtx) {
-        tCtx.beginPath();
-        tCtx.arc(x, y, brushSize / zoom, 0, Math.PI * 2);
-        tCtx.fill();
+        drawBrush(tCtx, x, y, brushSize / zoom);
         tCtx.globalCompositeOperation = 'source-in';
         tCtx.drawImage(originalImg, -canvasOffset.x, -canvasOffset.y);
         
@@ -398,47 +423,48 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
   return (
     <div className="flex flex-col h-full bg-slate-50 rounded-3xl overflow-hidden shadow-2xl border border-slate-200">
       {/* Header Toolbar */}
-      <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <button 
-            onClick={onReset}
-            className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors"
-            title="Start Over"
-          >
-            <Undo className="w-5 h-5" />
-          </button>
-          <div className="h-6 w-px bg-slate-200 mx-2" />
-          <button 
-            onClick={smoothEdges}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-slate-500 hover:bg-slate-100 transition-all"
-            title="Smooth Edges (Feathering)"
-          >
-            <Sparkles className="w-4 h-4 text-blue-500" />
-            Smooth
-          </button>
-          <div className="h-6 w-px bg-slate-200 mx-2" />
-          
-          <div className="relative">
+      <div className="bg-white border-b border-slate-200 px-4 md:px-6 py-3 md:py-4 flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="flex items-center justify-between w-full md:w-auto gap-2 md:gap-4 overflow-x-auto no-scrollbar pb-1 md:pb-0">
+          <div className="flex items-center gap-1 md:gap-2">
             <button 
-              onClick={() => setShowFiltersMenu(!showFiltersMenu)}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
-                showFiltersMenu ? "bg-blue-50 text-blue-600" : "text-slate-500 hover:bg-slate-100"
-              )}
-              title="Image Filters & Adjustments"
+              onClick={onReset}
+              className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors"
+              title="Start Over"
             >
-              <Sliders className="w-4 h-4 text-purple-500" />
-              Filters
+              <Undo className="w-5 h-5" />
             </button>
+            <div className="h-6 w-px bg-slate-200 mx-1 md:mx-2" />
+            <button 
+              onClick={smoothEdges}
+              className="flex items-center gap-2 px-3 md:px-4 py-2 rounded-lg text-sm font-medium text-slate-500 hover:bg-slate-100 transition-all whitespace-nowrap"
+              title="Smooth Edges (Feathering)"
+            >
+              <Sparkles className="w-4 h-4 text-blue-500" />
+              <span className="hidden sm:inline">Smooth</span>
+            </button>
+            <div className="h-6 w-px bg-slate-200 mx-1 md:mx-2" />
+            
+            <div className="relative">
+              <button 
+                onClick={() => setShowFiltersMenu(!showFiltersMenu)}
+                className={cn(
+                  "flex items-center gap-2 px-3 md:px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap",
+                  showFiltersMenu ? "bg-blue-50 text-blue-600" : "text-slate-500 hover:bg-slate-100"
+                )}
+                title="Image Filters & Adjustments"
+              >
+                <Sliders className="w-4 h-4 text-purple-500" />
+                <span className="hidden sm:inline">Filters</span>
+              </button>
 
-            <AnimatePresence>
-              {showFiltersMenu && (
-                <motion.div 
-                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                  className="absolute left-0 mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 p-5 z-50"
-                >
+              <AnimatePresence>
+                {showFiltersMenu && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="fixed inset-x-4 top-24 md:absolute md:inset-auto md:left-0 md:mt-2 w-auto md:w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 p-5 z-[60]"
+                  >
                   <div className="flex items-center justify-between mb-4">
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Adjustments</p>
                     <button 
@@ -574,22 +600,22 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
             <button 
               onClick={() => setTool('erase')}
               className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
+                "flex items-center gap-2 px-3 md:px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap",
                 tool === 'erase' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
               )}
             >
               <Eraser className="w-4 h-4" />
-              Erase
+              <span className="hidden lg:inline">Erase</span>
             </button>
             <button 
               onClick={() => setTool('restore')}
               className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
+                "flex items-center gap-2 px-3 md:px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap",
                 tool === 'restore' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
               )}
             >
               <Paintbrush className="w-4 h-4" />
-              Restore
+              <span className="hidden lg:inline">Restore</span>
             </button>
             <button 
               onClick={() => {
@@ -597,12 +623,12 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
                 setCropRect(null);
               }}
               className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
+                "flex items-center gap-2 px-3 md:px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap",
                 tool === 'crop' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
               )}
             >
               <Crop className="w-4 h-4" />
-              Crop
+              <span className="hidden lg:inline">Crop</span>
             </button>
           </div>
           {tool === 'crop' && cropRect && (
@@ -616,18 +642,56 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
           )}
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl mr-4">
-            <span className="text-xs font-medium text-slate-500">Brush Size</span>
-            <input 
-              type="range" 
-              min="5" 
-              max="100" 
-              value={brushSize} 
-              onChange={(e) => setBrushSize(parseInt(e.target.value))}
-              className="w-24 h-1.5 bg-slate-300 rounded-lg appearance-none cursor-pointer accent-blue-600"
-            />
-            <span className="text-xs font-mono text-slate-600 w-6 text-right">{brushSize}</span>
+        <div className="flex items-center justify-between w-full md:w-auto gap-3">
+          <div className="flex items-center gap-2 md:gap-3 bg-slate-100 p-1 rounded-xl flex-1 md:flex-none overflow-x-auto no-scrollbar">
+            <div className="flex items-center gap-2 px-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase whitespace-nowrap hidden sm:inline">Size</span>
+              <input 
+                type="range" min="5" max="100" value={brushSize} 
+                onChange={(e) => setBrushSize(parseInt(e.target.value))}
+                className="w-12 sm:w-16 h-1 bg-slate-300 rounded-lg appearance-none cursor-pointer accent-blue-600"
+              />
+              <span className="text-[10px] font-mono text-slate-500 w-4">{brushSize}</span>
+            </div>
+            <div className="h-4 w-px bg-slate-300" />
+            <div className="flex items-center gap-2 px-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase whitespace-nowrap hidden sm:inline">Opacity</span>
+              <input 
+                type="range" min="0.1" max="1" step="0.1" value={brushOpacity} 
+                onChange={(e) => setBrushOpacity(parseFloat(e.target.value))}
+                className="w-12 sm:w-16 h-1 bg-slate-300 rounded-lg appearance-none cursor-pointer accent-blue-600"
+              />
+              <span className="text-[10px] font-mono text-slate-500 w-6">{Math.round(brushOpacity * 100)}%</span>
+            </div>
+            <div className="h-4 w-px bg-slate-300" />
+            <div className="flex items-center gap-1 px-1">
+              <button 
+                onClick={() => setBrushStyle('hard')}
+                className={cn("p-1.5 rounded-md transition-all", brushStyle === 'hard' ? "bg-white text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600")}
+                title="Hard Round"
+              >
+                <div className="w-3 h-3 rounded-full bg-current" />
+              </button>
+              <button 
+                onClick={() => setBrushStyle('soft')}
+                className={cn("p-1.5 rounded-md transition-all", brushStyle === 'soft' ? "bg-white text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600")}
+                title="Soft Round"
+              >
+                <div className="w-3 h-3 rounded-full bg-current blur-[1px]" />
+              </button>
+              <button 
+                onClick={() => setBrushStyle('textured')}
+                className={cn("p-1.5 rounded-md transition-all", brushStyle === 'textured' ? "bg-white text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600")}
+                title="Textured"
+              >
+                <div className="w-3 h-3 grid grid-cols-2 gap-0.5">
+                  <div className="w-1 h-1 rounded-full bg-current" />
+                  <div className="w-1 h-1 rounded-full bg-current opacity-60" />
+                  <div className="w-1 h-1 rounded-full bg-current opacity-80" />
+                  <div className="w-1 h-1 rounded-full bg-current opacity-40" />
+                </div>
+              </button>
+            </div>
           </div>
 
           <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
@@ -642,10 +706,10 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
           <div className="relative">
             <button 
               onClick={() => setShowExportMenu(!showExportMenu)}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-semibold transition-all shadow-lg shadow-blue-200"
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-3 md:px-5 py-2 md:py-2.5 rounded-xl font-semibold transition-all shadow-lg shadow-blue-200 whitespace-nowrap"
             >
               <Download className="w-4 h-4" />
-              Export
+              <span className="hidden sm:inline">Export</span>
               <ChevronDown className={cn("w-4 h-4 transition-transform", showExportMenu && "rotate-180")} />
             </button>
 
@@ -713,6 +777,7 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
           </div>
         </div>
       </div>
+    </div>
 
       {/* Main Workspace */}
       <div className="flex-1 relative overflow-hidden bg-[url('https://www.transparenttextures.com/patterns/checkerboard.png')] bg-slate-200">
@@ -776,15 +841,15 @@ export const Editor: React.FC<EditorProps> = ({ originalImage, processedImage, o
       </div>
 
       {/* Footer Info */}
-      <div className="bg-white border-t border-slate-200 px-6 py-3 flex items-center justify-between text-[10px] text-slate-400 font-medium uppercase tracking-widest">
-        <div className="flex gap-6">
+      <div className="bg-white border-t border-slate-200 px-4 md:px-6 py-3 flex flex-col sm:flex-row items-center justify-between gap-2 text-[10px] text-slate-400 font-medium uppercase tracking-widest">
+        <div className="flex flex-wrap justify-center gap-4 md:gap-6">
           <span className="flex items-center gap-1.5">
             <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
             AI Edge Detection Active
           </span>
           <span>Alpha Channel Enabled</span>
         </div>
-        <div>
+        <div className="text-center sm:text-right">
           Optimized for T-Shirt Printing (300 DPI)
         </div>
       </div>
